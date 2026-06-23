@@ -5,14 +5,16 @@
 FROM falkordb/falkordb:latest AS falkordb-base
 
 # Install Python and system dependencies
-# Note: Debian Bookworm (FalkorDB base) ships with Python 3.11
+# Note: the FalkorDB base now tracks Debian 13 (Trixie, Python 3.13).
+# procps is intentionally omitted: on the Trixie base its postinst calls a
+# missing update-rc.d and aborts the build, and nothing in this image's
+# runtime (start-services.sh uses redis-cli/node/uv) needs it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-dev \
     python3-pip \
     curl \
     ca-certificates \
-    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for Python package management
@@ -33,7 +35,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app/mcp
 
 # Accept graphiti-core version as build argument
-ARG GRAPHITI_CORE_VERSION=0.28.1
+ARG GRAPHITI_CORE_VERSION=0.29.2
 
 # Copy project files for dependency installation
 COPY pyproject.toml uv.lock ./
@@ -57,6 +59,7 @@ RUN echo "${GRAPHITI_CORE_VERSION}" > /app/mcp/.graphiti-core-version
 
 # Copy MCP server application code
 COPY main.py ./
+COPY proxy_shim.py ./
 COPY src/ ./src/
 COPY config/ ./config/
 
@@ -104,9 +107,12 @@ else
 fi
 
 # Start MCP server in foreground
+# proxy_shim.py monkey-patches FastMCP to honor X-Forwarded-* headers (for HTTPS
+# reverse proxies like Coolify/Traefik) and disables DNS-rebinding protection so
+# requests with a public Host header are accepted, then hands off to main().
 echo "Starting MCP server..."
 cd /app/mcp
-exec /root/.local/bin/uv run --no-sync main.py
+exec /root/.local/bin/uv run --no-sync proxy_shim.py
 EOF
 
 RUN chmod +x /start-services.sh
