@@ -87,8 +87,9 @@ RUN --mount=type=secret,id=socket_api_key \
     $UV_CMD lock
 
 # Install Python dependencies (exclude dev dependency group)
-# Include optional provider extras so the image matches the providers
-# advertised by the MCP server configuration and docs.
+# Fork: omit --extra providers --extra azure. The providers extra pulls
+# sentence-transformers -> torch -> NVIDIA CUDA libs (~3 GB compressed on
+# amd64). This deploy uses the OpenAI LLM + embedder only.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=socket_api_key \
     set -eu; \
@@ -107,7 +108,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       echo "socket_api_key absent; installing without Socket Firewall"; \
       UV_CMD="uv"; \
     fi; \
-    $UV_CMD sync --no-group dev --extra providers --extra azure
+    $UV_CMD sync --no-group dev
 
 # Store graphiti-core version
 RUN echo "${GRAPHITI_CORE_VERSION}" > /app/mcp/.graphiti-core-version
