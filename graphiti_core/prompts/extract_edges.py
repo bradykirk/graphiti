@@ -46,9 +46,9 @@ class Edge(BaseModel):
         description='The date and time when the relationship described by the edge fact stopped being true or ended. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS.SSSSSSZ)',
     )
     episode_indices: list[int] = Field(
-        default_factory=lambda: [1],
-        description='List of episode numbers (1-indexed) that this fact was derived from. '
-        'When processing a single episode, this should be [1].',
+        default_factory=lambda: [0],
+        description='List of episode numbers (0-indexed) that this fact was derived from. '
+        'When processing a single episode, this should be [0].',
     )
 
 
@@ -56,14 +56,39 @@ class ExtractedEdges(BaseModel):
     edges: list[Edge]
 
 
+class EdgeTimestamps(BaseModel):
+    """Temporal bounds extracted from a fact."""
+
+    valid_at: str | None = Field(
+        None,
+        description='When the fact became true. ISO 8601 with Z suffix (e.g., 2025-04-30T00:00:00Z)',
+    )
+    invalid_at: str | None = Field(
+        None,
+        description='When the fact stopped being true. ISO 8601 with Z suffix (e.g., 2025-04-30T00:00:00Z)',
+    )
+
+
+class BatchEdgeTimestamps(BaseModel):
+    """Temporal bounds for a batch of facts."""
+
+    timestamps: list[EdgeTimestamps] = Field(
+        ..., description='Timestamps for each fact, in the same order as the input facts'
+    )
+
+
 class Prompt(Protocol):
     edge: PromptVersion
     extract_attributes: PromptVersion
+    extract_timestamps: PromptVersion
+    extract_timestamps_batch: PromptVersion
 
 
 class Versions(TypedDict):
     edge: PromptFunction
     extract_attributes: PromptFunction
+    extract_timestamps: PromptFunction
+    extract_timestamps_batch: PromptFunction
 
 
 def edge(context: dict[str, Any]) -> list[Message]:
@@ -127,8 +152,8 @@ You may use information from the PREVIOUS MESSAGES only to disambiguate referenc
    - GOOD: "Nate plays games on a Gamecube" → Nate -> PLAYS_GAMES_ON -> Gamecube (when "Gamecube" is in ENTITIES)
    - GOOD: "Alice congratulated Bob" (relationship between two entities), "Alice lives in Paris" (relationship between entity and place)
 4. Do not emit semantically redundant facts, even across episodes within the CURRENT_MESSAGE. However, if a later episode adds specific details to a previously stated fact (e.g., adding a brand name, a count, a color, a location, or any concrete attribute), extract the more detailed version as a NEW fact — it is NOT a duplicate. Only treat facts as duplicates when they convey the same specificity.
-   - NOT a duplicate: "user plays video games" (episode 1) vs. "user plays games on a Gamecube" (episode 2) → extract the second, more detailed fact.
-   - IS a duplicate: "user plays games on a Gamecube" (episode 1) vs. "user plays Gamecube games" (episode 2) → extract once, list both episodes in `episode_indices`.
+   - NOT a duplicate: "user plays video games" (Episode 0) vs. "user plays games on a Gamecube" (Episode 1) → extract the second, more detailed fact.
+   - IS a duplicate: "user plays games on a Gamecube" (Episode 0) vs. "user plays Gamecube games" (Episode 1) → extract once, list both episodes in `episode_indices`.
 5. The `fact` MUST preserve all specific details from the source text: proper nouns, brand names, product names, model numbers, quantities, counts, colors, materials, physical descriptions, specific items, named locations, and named activities. Paraphrase the sentence structure but NEVER generalize:
    - NEVER generalize "Gamecube" to "gaming console", "Ford Mustang" to "car", "wool coat" to "coat", "red and purple lighting" to "lighting", "cracked windshield" to "car damage", or "three screenplays" to "several screenplays".
    - Do not verbatim quote the original text, but every concrete noun, number, and descriptor in the source should survive into the `fact`.
@@ -157,20 +182,46 @@ def extract_attributes(context: dict[str, Any]) -> list[Message]:
     return [
         Message(
             role='system',
-            content='You are a fact attribute extraction specialist. NEVER hallucinate or infer values not explicitly stated.',
+            content=(
+                'You are a fact attribute extraction specialist. '
+                'You ONLY emit attribute values that are explicitly stated in the FACT or '
+                'already present in EXISTING ATTRIBUTES. You output strictly the JSON specified '
+                'by the response schema — no reasoning, no explanation, no commentary in any field.'
+            ),
         ),
         Message(
             role='user',
-            content=f"""
-Given the following FACT, its REFERENCE TIME, and any EXISTING ATTRIBUTES, extract or update
-attributes based on the information explicitly stated in the fact. Use the provided attribute
-descriptions to understand how each attribute should be determined.
+            content=f"""\
+Given the following FACT, its REFERENCE TIME, and any EXISTING ATTRIBUTES, update the attributes.
 
-Guidelines:
-1. NEVER hallucinate or infer attribute values — only use values explicitly stated in the FACT.
-2. Only use information stated in the FACT to set attribute values.
-3. Use REFERENCE TIME to resolve any relative temporal expressions in the fact.
-4. Preserve existing attribute values unless the fact explicitly provides new information.
+HARD RULES — violating any of these is a failure:
+
+1. Each attribute value MUST be one of:
+   (a) a clean value copied or directly normalized from the FACT,
+   (b) the existing value already in EXISTING ATTRIBUTES (preserved unchanged), or
+   (c) null / omitted, when neither (a) nor (b) applies.
+
+2. NEVER write reasoning, justification, or commentary into any field. Specifically:
+   - NEVER include parenthetical explanations like "(implied by ...)", "(Context: ...)",
+     "(not explicitly stated ...)", "(based on ...)".
+   - NEVER include first-person or deliberative phrases like "I should...", "However...",
+     "Sticking to...", "Since no...", "the instruction is to...", "must be kept...".
+   - NEVER list alternatives or candidates inside one field ("X, or Y, or maybe Z").
+   - NEVER explain why a value is null. If unknown, set the field to null and stop.
+
+3. Each attribute schema description tells you the FORMAT a real value should take. The
+   description text is NEVER itself a value. NEVER copy schema description text into the field.
+
+4. The literal strings "null", "N/A", "Not specified", "unknown", "none", "not provided",
+   or any sentence describing absence are NOT valid values. If no value is supported by
+   the FACT, set the field to null (or omit it) — do not write a sentence.
+
+5. Each attribute value must be a short, well-formed instance of the type the field
+   describes. If you cannot produce a clean value of that type from the FACT, the field is null.
+
+6. Use REFERENCE TIME to resolve any relative temporal expressions in the fact.
+
+7. Preserve existing attribute values unless the FACT explicitly provides a new value.
 
 <FACT>
 {context['fact']}
@@ -188,7 +239,71 @@ Guidelines:
     ]
 
 
+def extract_timestamps(context: dict[str, Any]) -> list[Message]:
+    return [
+        Message(
+            role='system',
+            content='You extract temporal bounds from facts. NEVER hallucinate dates.',
+        ),
+        Message(
+            role='user',
+            content=f"""Given a FACT and its REFERENCE TIME, determine when the fact became true
+(valid_at) and when it stopped being true (invalid_at).
+
+Rules:
+- Resolve relative expressions ("last week", "2 years ago", "yesterday") using REFERENCE TIME.
+- If the fact is ongoing (present tense), set valid_at to REFERENCE TIME.
+- If a change or end is expressed, set invalid_at to the relevant time.
+- Leave both null if no time is stated or resolvable.
+- If only a date is mentioned (no time), assume 00:00:00.
+- Use ISO 8601 with Z suffix (e.g., 2025-04-30T00:00:00Z).
+- Do NOT hallucinate or infer dates from unrelated events.
+
+<FACT>
+{context['fact']}
+</FACT>
+
+<REFERENCE TIME>
+{context['reference_time']}
+</REFERENCE TIME>
+""",
+        ),
+    ]
+
+
+def extract_timestamps_batch(context: dict[str, Any]) -> list[Message]:
+    return [
+        Message(
+            role='system',
+            content='You extract temporal bounds from facts. NEVER hallucinate dates.',
+        ),
+        Message(
+            role='user',
+            content=f"""Given a list of FACTS with their REFERENCE TIMES, determine when each fact
+became true (valid_at) and when it stopped being true (invalid_at).
+
+Rules:
+- Resolve relative expressions ("last week", "2 years ago", "yesterday") using each fact's REFERENCE TIME.
+- If the fact is ongoing (present tense), set valid_at to its REFERENCE TIME.
+- If a change or end is expressed, set invalid_at to the relevant time.
+- Leave both null if no time is stated or resolvable.
+- If only a date is mentioned (no time), assume 00:00:00.
+- Use ISO 8601 with Z suffix (e.g., 2025-04-30T00:00:00Z).
+- Do NOT hallucinate or infer dates from unrelated events.
+
+Return one timestamps entry per fact, in the same order.
+
+<FACTS>
+{to_prompt_json(context['facts'])}
+</FACTS>
+""",
+        ),
+    ]
+
+
 versions: Versions = {
     'edge': edge,
     'extract_attributes': extract_attributes,
+    'extract_timestamps': extract_timestamps,
+    'extract_timestamps_batch': extract_timestamps_batch,
 }

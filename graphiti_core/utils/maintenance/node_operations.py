@@ -42,6 +42,7 @@ from graphiti_core.prompts.extract_nodes import (
 from graphiti_core.search.search_filters import SearchFilters
 from graphiti_core.search.search_utils import node_similarity_search
 from graphiti_core.utils.datetime_utils import utc_now
+from graphiti_core.utils.maintenance.attribute_utils import apply_capped_attributes
 from graphiti_core.utils.maintenance.dedup_helpers import (
     DedupCandidateIndexes,
     DedupResolutionState,
@@ -104,10 +105,10 @@ async def extract_nodes(
     if len(episodes) > 1:
         episode_attribution = (
             '\n7. **Episode Attribution**: The content contains multiple episodes labeled '
-            '[Episode 1], [Episode 2], etc. Each episode header includes a timestamp indicating '
+            '[Episode 0], [Episode 1], etc. Each episode header includes a timestamp indicating '
             'when that episode occurred. For each extracted entity, set `episode_indices` '
-            'to the list of episode numbers where that entity is mentioned. '
-            'An entity appearing in Episodes 1 and 3 should have `episode_indices: [1, 3]`.'
+            'to the 0-based list of episode numbers where that entity is mentioned. '
+            'An entity appearing in Episodes 0 and 2 should have `episode_indices: [0, 2]`.'
         )
 
     # Build base context
@@ -320,9 +321,9 @@ def _create_entity_nodes(
         )
         extracted_nodes.append(new_node)
 
-        # Map node to 0-indexed episode positions (LLM returns 1-indexed).
+        # Map node to 0-indexed episode positions (LLM returns 0-indexed).
         # Clamp to valid range; fall back to all episodes if empty.
-        indices = [i - 1 for i in extracted_entity.episode_indices if 1 <= i <= len(episodes)]
+        indices = [i for i in extracted_entity.episode_indices if 0 <= i < len(episodes)]
         if not indices:
             indices = list(range(len(episodes)))
         node_episode_index_map[new_node.uuid] = indices
@@ -757,9 +758,10 @@ async def extract_attributes_from_nodes(
         ]
     )
 
-    # Apply attributes to nodes
+    # _extract_entity_attributes returns the already-merged attribute dict
+    # (overlay of prior + cap-kept fields), so direct assignment is the merge.
     for node, attributes in zip(nodes, attribute_results, strict=True):
-        node.attributes.update(attributes)
+        node.attributes = attributes
 
     # Extract summaries in batch
     await _extract_entity_summaries_batch(
@@ -805,12 +807,27 @@ async def _extract_entity_attributes(
         model_size=ModelSize.small,
         group_id=node.group_id,
         prompt_name='extract_nodes.extract_attributes',
+        attribute_extraction=True,
     )
 
-    # validate response
-    entity_type(**llm_response)
+    # Overlay merge: cap-dropped or LLM-omitted fields keep prior values.
+    # See attribute_utils for the merge_mode contract; the edge path uses 'replace'.
+    merged, _ = apply_capped_attributes(
+        llm_response,
+        entity_type,
+        node.attributes,
+        merge_mode='overlay',
+        prompt_name='extract_nodes.extract_attributes',
+        entity_uuid=node.uuid,
+        group_id=node.group_id,
+    )
 
-    return llm_response
+    # Shape validation only — we discard the validated instance because returning
+    # `model_dump()` would expand defaults across all fields and clobber prior
+    # values that the merge above just preserved.
+    entity_type(**merged)
+
+    return merged
 
 
 async def _extract_entity_summaries_batch(
