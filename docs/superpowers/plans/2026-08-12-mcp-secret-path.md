@@ -100,7 +100,8 @@ def status_of(sent: list) -> int:
     return sent[0]['status']
 
 
-async def test_correct_prefix_reaches_app_with_prefix_stripped():
+async def test_correct_prefix_reaches_app_with_path_intact():
+    """ASGI requires root_path to prefix path, so path is passed through whole."""
     seen = []
     app = SecretPathMiddleware(make_inner_app(seen), SECRET)
 
@@ -108,8 +109,8 @@ async def test_correct_prefix_reaches_app_with_prefix_stripped():
 
     assert status_of(sent) == 200
     assert len(seen) == 1
-    assert seen[0]['path'] == '/mcp'
-    assert seen[0]['raw_path'] == b'/mcp'
+    assert seen[0]['path'] == f'{PREFIX}/mcp'
+    assert seen[0]['raw_path'] == f'{PREFIX}/mcp'.encode()
 
 
 async def test_root_path_is_set_so_redirects_keep_the_prefix():
@@ -268,12 +269,11 @@ class SecretPathMiddleware:
             await self._not_found(send)
             return
 
-        remainder = path[len(self.prefix) :] or '/'
         scope = dict(scope)
-        scope['path'] = remainder
-        scope['raw_path'] = remainder.encode()
-        # root_path makes the app rebuild absolute URLs with the prefix intact,
-        # so its 307 redirect does not strand the client on a 404.
+        # Under ASGI, root_path is a PREFIX OF path, not a substitute for it.
+        # Starlette strips root_path off path to route, and builds redirect
+        # Location headers from the full path. So leave path and raw_path alone:
+        # rewriting them makes the 307 drop the secret and strand the client.
         scope['root_path'] = self.prefix
 
         await self.app(scope, receive, send)
@@ -282,8 +282,13 @@ class SecretPathMiddleware:
         candidate = path[: len(self.prefix)]
         if len(candidate) != len(self.prefix):
             return False
-        # Constant-time, so response timing does not leak the secret.
-        if not hmac.compare_digest(candidate, self.prefix):
+        # Constant-time, so response timing does not leak the secret. Compare
+        # bytes: compare_digest raises TypeError on a non-ASCII str, and an
+        # ASGI server percent-decodes the path, so a %C3%A9 probe would raise
+        # instead of getting the mandated 404.
+        if not hmac.compare_digest(
+            candidate.encode('utf-8', 'surrogatepass'), self.prefix.encode('utf-8')
+        ):
             return False
         rest = path[len(self.prefix) :]
         return rest == '' or rest.startswith('/')

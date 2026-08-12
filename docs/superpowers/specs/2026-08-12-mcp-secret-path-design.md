@@ -66,17 +66,24 @@ redirect. That redirect is what broke the first Grok connector attempt on 2026-0
 | Incoming path | Action |
 | --- | --- |
 | `/health` | Pass through unchanged, so the Coolify healthcheck keeps working. |
-| `/s/<correct-secret>/...` | Strip the prefix, set `root_path`, pass to the app. |
+| `/s/<correct-secret>/...` | Set `root_path` to the prefix, pass to the app. |
 | Anything else | Return 404, plain body, no detail. |
 
 Three required properties:
 
-1. **Timing-safe compare.** Use `hmac.compare_digest`. A byte-by-byte compare leaks the
-   secret through response timing.
+1. **Timing-safe compare.** Use `hmac.compare_digest` on **bytes**, not `str`.
+   `compare_digest` raises `TypeError` on a non-ASCII `str`, and an ASGI server
+   percent-decodes the request path, so a probe carrying `%C3%A9` would raise instead of
+   returning 404.
 2. **404, not 403.** A 403 confirms to a scanner that a protected resource exists.
-3. **Set `scope["root_path"] = "/s/<secret>"`** alongside the rewritten `path` and
-   `raw_path`. Without it, any redirect the app generates rebuilds a `Location` that omits
-   the secret prefix, so the client follows it to a 404.
+3. **Set `scope["root_path"] = "/s/<secret>"` and leave `path` and `raw_path` alone.**
+   Under ASGI, `root_path` is a *prefix of* `path`, not a substitute for it. Starlette's
+   `get_route_path` strips `root_path` off `path` to route, and its trailing-slash redirect
+   builds `Location` from the full `path`. Rewriting `path` to the remainder therefore
+   produces a redirect whose `Location` drops the secret, stranding the client on a 404 —
+   the exact failure this design exists to prevent. Verified against Starlette 1.3.1:
+   stripping the path yields `Location: /mcp`; leaving it intact yields
+   `Location: /s/<secret>/mcp`.
 
 ### Configuration
 
@@ -104,11 +111,16 @@ The old URL stops working at redeploy.
 
 Unit tests against the middleware, no network needed:
 
-- Correct prefix reaches the wrapped app, and the app sees `path == "/mcp"`.
+- Correct prefix reaches the wrapped app, and the app still sees the full
+  `path == "/s/<secret>/mcp"`.
+- `root_path` is set to the prefix on a passing request, so a real router resolves the
+  route to `/mcp` and keeps the prefix in any redirect it emits.
 - Wrong prefix returns 404.
 - Missing prefix returns 404.
+- A path that merely starts with the secret, without a segment boundary, returns 404.
+- A non-ASCII character inside the compared slice returns 404 rather than raising.
 - `/health` returns 200 with no prefix.
-- `root_path` is set to the prefix on a passing request.
+- Non-HTTP scopes, notably `lifespan`, reach the app unchanged.
 - Middleware is absent when `MCP_URL_SECRET` is unset.
 
 Post-deploy verification with curl:
