@@ -109,6 +109,17 @@ async def test_prefix_must_end_on_a_segment_boundary():
     assert seen == []
 
 
+async def test_non_ascii_in_path_returns_404():
+    """Non-ASCII in path must not raise; must return 404."""
+    seen = []
+    app = SecretPathMiddleware(make_inner_app(seen), SECRET)
+
+    sent = await call(app, '/s/a1b2c3d4e5f60718293a4b5c6d7e8f9é/mcp')
+
+    assert status_of(sent) == 404
+    assert seen == []
+
+
 async def test_health_is_reachable_without_the_prefix():
     seen = []
     app = SecretPathMiddleware(make_inner_app(seen), SECRET)

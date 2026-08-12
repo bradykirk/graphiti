@@ -61,7 +61,11 @@ class SecretPathMiddleware:
         if len(candidate) != len(self.prefix):
             return False
         # Constant-time, so response timing does not leak the secret.
-        if not hmac.compare_digest(candidate, self.prefix):
+        # Encode with surrogatepass to handle decoded paths with surrogates.
+        if not hmac.compare_digest(
+            candidate.encode('utf-8', 'surrogatepass'),
+            self.prefix.encode('utf-8'),
+        ):
             return False
         rest = path[len(self.prefix) :]
         return rest == '' or rest.startswith('/')
