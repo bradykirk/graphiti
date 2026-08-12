@@ -28,6 +28,11 @@ async def _run_streamable_http_async(self):
         log_level=self.settings.log_level.lower(),
         proxy_headers=True,
         forwarded_allow_ips=os.environ.get('FORWARDED_ALLOW_IPS', '*'),
+        # The secret path lives in every request line (POST /s/<secret>/mcp).
+        # uvicorn's default access log writes that line to stderr, and Coolify
+        # stores and displays container stderr, so leaving it on would log the
+        # secret. Never log the secret value, in any branch, at any level.
+        access_log=False,
     )
     await uvicorn.Server(config).serve()
 

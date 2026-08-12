@@ -14,8 +14,17 @@ logger = logging.getLogger(__name__)
 SECRET_ENV_VAR = 'MCP_URL_SECRET'
 
 # Paths served without the secret. The Coolify healthcheck hits /health, and
-# blocking it would fail every deploy. It returns no graph data.
-PUBLIC_PATHS = frozenset({'/health'})
+# blocking it would fail every deploy. It returns no graph data. /health/ is
+# included too: before this middleware existed, Starlette 307-redirected
+# /health/ to /health, and a healthcheck URL configured with the trailing
+# slash must keep working.
+PUBLIC_PATHS = frozenset({'/health', '/health/'})
+
+# 128 bits of entropy at 32 hex characters is the design target (see
+# docs/superpowers/specs/2026-08-12-mcp-secret-path-design.md). 16 characters
+# is a floor well below that, meant only to reject obviously guessable values
+# like "graphiti", not to certify a secret as strong.
+MIN_SECRET_LENGTH = 16
 
 _NOT_FOUND_BODY = b'Not Found'
 
@@ -30,10 +39,23 @@ class SecretPathMiddleware:
         self.prefix = f'/s/{secret}'
 
     async def __call__(self, scope, receive, send):
-        # Lifespan and websocket scopes carry no path. Lifespan in particular
-        # MUST reach the app, or the session manager never starts.
-        if scope['type'] != 'http':
+        scope_type = scope.get('type')
+
+        # Lifespan carries no path and MUST reach the app, or the session
+        # manager never starts. Every other non-http scope is refused: a
+        # websocket scope carries a path (the app registers no websocket
+        # route today, so this has been unreachable in practice, not safe
+        # by design), and any future scope type not handled here is refused
+        # by default rather than passed through unchecked.
+        if scope_type == 'lifespan':
             await self.app(scope, receive, send)
+            return
+
+        if scope_type == 'websocket':
+            await send({'type': 'websocket.close', 'code': 1000})
+            return
+
+        if scope_type != 'http':
             return
 
         path = scope.get('path', '')
@@ -97,6 +119,9 @@ def wrap_with_secret_path(app):
 
     if '/' in secret:
         raise ValueError(f'{SECRET_ENV_VAR} must not contain "/"')
+
+    if len(secret) < MIN_SECRET_LENGTH:
+        raise ValueError(f'{SECRET_ENV_VAR} must be at least {MIN_SECRET_LENGTH} characters')
 
     logger.info('Secret path protection is enabled.')
     return SecretPathMiddleware(app, secret)

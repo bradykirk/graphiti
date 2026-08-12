@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from utils.secret_path import (  # noqa: E402
+    MIN_SECRET_LENGTH,
     SECRET_ENV_VAR,
     SecretPathMiddleware,
     wrap_with_secret_path,
@@ -57,7 +58,7 @@ def status_of(sent: list) -> int:
     return sent[0]['status']
 
 
-async def test_correct_prefix_reaches_app_with_path_intact():
+async def test_correct_prefix_reaches_app_with_full_path():
     """ASGI requires root_path to prefix path, so path is passed through whole."""
     seen = []
     app = SecretPathMiddleware(make_inner_app(seen), SECRET)
@@ -131,6 +132,29 @@ async def test_health_is_reachable_without_the_prefix():
     assert seen[0]['path'] == '/health'
 
 
+async def test_health_with_trailing_slash_is_reachable_without_the_prefix():
+    """Before this middleware existed, /health/ 307-redirected to /health.
+    A healthcheck URL configured with the trailing slash must still work."""
+    seen = []
+    app = SecretPathMiddleware(make_inner_app(seen), SECRET)
+
+    sent = await call(app, '/health/')
+
+    assert status_of(sent) == 200
+    assert seen[0]['path'] == '/health/'
+
+
+async def test_path_exactly_equal_to_prefix_reaches_app():
+    """No remainder after the prefix still passes the segment-boundary check."""
+    seen = []
+    app = SecretPathMiddleware(make_inner_app(seen), SECRET)
+
+    sent = await call(app, PREFIX)
+
+    assert status_of(sent) == 200
+    assert seen[0]['path'] == PREFIX
+
+
 async def test_lifespan_scope_passes_through():
     """The app must still start. Blocking lifespan would break the server."""
     seen = []
@@ -146,6 +170,34 @@ async def test_lifespan_scope_passes_through():
 
     assert len(seen) == 1
     assert seen[0]['type'] == 'lifespan'
+
+
+async def test_websocket_scope_is_refused_and_never_reaches_the_app():
+    """A websocket scope carries a path, unlike lifespan, so it must be
+    refused explicitly rather than passed through with the other non-http
+    scopes. The wrapped app registers no websocket route, so this must
+    close the connection without ever calling the app."""
+    seen = []
+    app = SecretPathMiddleware(make_inner_app(seen), SECRET)
+
+    scope = {
+        'type': 'websocket',
+        'path': f'{PREFIX}/mcp',
+        'raw_path': f'{PREFIX}/mcp'.encode(),
+        'headers': [],
+    }
+    sent = []
+
+    async def receive():
+        return {'type': 'websocket.connect'}
+
+    async def send(message):
+        sent.append(message)
+
+    await app(scope, receive, send)
+
+    assert seen == []
+    assert sent == [{'type': 'websocket.close', 'code': 1000}]
 
 
 async def test_starlette_router_redirect_keeps_the_secret_prefix():
@@ -211,3 +263,19 @@ def test_wrap_rejects_a_secret_containing_a_slash(monkeypatch):
 
     with pytest.raises(ValueError):
         wrap_with_secret_path(make_inner_app([]))
+
+
+def test_wrap_rejects_a_secret_shorter_than_the_minimum(monkeypatch):
+    monkeypatch.setenv(SECRET_ENV_VAR, 'a' * (MIN_SECRET_LENGTH - 1))
+
+    with pytest.raises(ValueError):
+        wrap_with_secret_path(make_inner_app([]))
+
+
+def test_wrap_accepts_a_secret_of_exactly_the_minimum_length(monkeypatch):
+    monkeypatch.setenv(SECRET_ENV_VAR, 'a' * MIN_SECRET_LENGTH)
+    inner = make_inner_app([])
+
+    wrapped = wrap_with_secret_path(inner)
+
+    assert isinstance(wrapped, SecretPathMiddleware)
