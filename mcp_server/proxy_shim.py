@@ -4,6 +4,8 @@ then hand off to the unmodified graphiti_mcp_server.main().
 Needed because FastMCP hardcodes uvicorn.Config(...) without proxy_headers, so
 behind an HTTPS reverse proxy (Traefik, Cloudflare) uvicorn emits redirects
 with scheme=http and the client refuses to follow the downgrade.
+It also gates every request behind an unguessable path prefix when
+MCP_URL_SECRET is set.
 """
 
 import os
@@ -15,8 +17,12 @@ from mcp.server.fastmcp import FastMCP
 async def _run_streamable_http_async(self):
     import uvicorn
 
+    # Imported here, not at module scope: sys.path only gains /app/mcp/src
+    # further down this file, and this function runs after that.
+    from utils.secret_path import wrap_with_secret_path
+
     config = uvicorn.Config(
-        self.streamable_http_app(),
+        wrap_with_secret_path(self.streamable_http_app()),
         host=self.settings.host,
         port=self.settings.port,
         log_level=self.settings.log_level.lower(),
