@@ -257,6 +257,22 @@ The `config.yaml` file supports environment variable expansion using `${VAR_NAME
 
 You can set these variables in a `.env` file in the project directory.
 
+### Protecting a public HTTP endpoint
+
+Set `MCP_URL_SECRET` to an unguessable value, for example 32 hex characters
+from `openssl rand -hex 16`. The server then serves MCP only at:
+
+    https://<host>/s/<MCP_URL_SECRET>/mcp
+
+Use the form with no trailing slash. `/health` stays reachable without the
+secret so container healthchecks keep working. Every other path returns 404.
+
+When `MCP_URL_SECRET` is unset the server logs a warning and stays open, which
+suits local development. Do not leave it unset on a public host.
+
+To rotate the secret: set a new value, redeploy, then update the URL in every
+connected client. The old URL stops working at redeploy.
+
 ## Running the Server
 
 ### Default Setup (FalkorDB Combined Container)
