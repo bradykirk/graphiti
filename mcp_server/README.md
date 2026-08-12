@@ -264,8 +264,10 @@ from `openssl rand -hex 16`. The server then serves MCP only at:
 
     https://<host>/s/<MCP_URL_SECRET>/mcp
 
-Use the form with no trailing slash. `/health` stays reachable without the
-secret so container healthchecks keep working. Every other path returns 404.
+Either form works, with or without a trailing slash: the redirect Starlette
+issues for the trailing-slash form preserves the secret prefix. `/health` and
+`/health/` both stay reachable without the secret, so container healthchecks
+keep working either way. Every other path returns 404.
 
 When `MCP_URL_SECRET` is unset the server logs a warning and stays open, which
 suits local development. Do not leave it unset on a public host.
