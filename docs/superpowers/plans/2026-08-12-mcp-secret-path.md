@@ -100,7 +100,7 @@ def status_of(sent: list) -> int:
     return sent[0]['status']
 
 
-async def test_correct_prefix_reaches_app_with_path_intact():
+async def test_correct_prefix_reaches_app_with_full_path():
     """ASGI requires root_path to prefix path, so path is passed through whole."""
     seen = []
     app = SecretPathMiddleware(make_inner_app(seen), SECRET)

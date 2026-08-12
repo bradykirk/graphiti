@@ -120,7 +120,12 @@ Unit tests against the middleware, no network needed:
 - A path that merely starts with the secret, without a segment boundary, returns 404.
 - A non-ASCII character inside the compared slice returns 404 rather than raising.
 - `/health` returns 200 with no prefix.
-- Non-HTTP scopes, notably `lifespan`, reach the app unchanged.
+- A `lifespan` scope reaches the app unchanged. Without this the server never starts.
+- A `websocket` scope is refused with a close frame and never reaches the app. Any other
+  scope type is dropped. Only `lifespan` bypasses the gate.
+- A secret shorter than 16 characters raises at startup, so the container fails closed.
+- `/health/` with a trailing slash is reachable, like `/health`. The container healthcheck
+  may use either form.
 - Middleware is absent when `MCP_URL_SECRET` is unset.
 
 Post-deploy verification with curl:
