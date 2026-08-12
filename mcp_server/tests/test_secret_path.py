@@ -57,7 +57,8 @@ def status_of(sent: list) -> int:
     return sent[0]['status']
 
 
-async def test_correct_prefix_reaches_app_with_prefix_stripped():
+async def test_correct_prefix_reaches_app_with_path_intact():
+    """ASGI requires root_path to prefix path, so path is passed through whole."""
     seen = []
     app = SecretPathMiddleware(make_inner_app(seen), SECRET)
 
@@ -65,8 +66,8 @@ async def test_correct_prefix_reaches_app_with_prefix_stripped():
 
     assert status_of(sent) == 200
     assert len(seen) == 1
-    assert seen[0]['path'] == '/mcp'
-    assert seen[0]['raw_path'] == b'/mcp'
+    assert seen[0]['path'] == f'{PREFIX}/mcp'
+    assert seen[0]['raw_path'] == f'{PREFIX}/mcp'.encode()
 
 
 async def test_root_path_is_set_so_redirects_keep_the_prefix():
@@ -145,6 +146,43 @@ async def test_lifespan_scope_passes_through():
 
     assert len(seen) == 1
     assert seen[0]['type'] == 'lifespan'
+
+
+async def test_starlette_router_redirect_keeps_the_secret_prefix():
+    """A trailing slash triggers Starlette's 307. The Location must keep the prefix."""
+    from starlette.applications import Starlette
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    async def endpoint(request):
+        return PlainTextResponse('ok')
+
+    inner = Starlette(routes=[Route('/mcp', endpoint, methods=['POST'])])
+    app = SecretPathMiddleware(inner, SECRET)
+
+    scope = {
+        'type': 'http',
+        'method': 'POST',
+        'path': f'{PREFIX}/mcp/',
+        'raw_path': f'{PREFIX}/mcp/'.encode(),
+        'query_string': b'',
+        'scheme': 'http',
+        'server': ('testserver', 80),
+        'headers': [],
+    }
+    sent = []
+
+    async def receive():
+        return {'type': 'http.request', 'body': b'', 'more_body': False}
+
+    async def send(message):
+        sent.append(message)
+
+    await app(scope, receive, send)
+
+    assert status_of(sent) == 307
+    location = dict(sent[0]['headers'])[b'location'].decode()
+    assert location.endswith(f'{PREFIX}/mcp')
 
 
 def test_empty_secret_is_rejected():

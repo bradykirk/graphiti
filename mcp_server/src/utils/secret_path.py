@@ -46,12 +46,11 @@ class SecretPathMiddleware:
             await self._not_found(send)
             return
 
-        remainder = path[len(self.prefix) :] or '/'
         scope = dict(scope)
-        scope['path'] = remainder
-        scope['raw_path'] = remainder.encode()
-        # root_path makes the app rebuild absolute URLs with the prefix intact,
-        # so its 307 redirect does not strand the client on a 404.
+        # Under ASGI, root_path is a PREFIX OF path, not a substitute for it.
+        # Starlette strips root_path off path to route, and builds redirect
+        # Location headers from the full path. So leave path and raw_path alone:
+        # rewriting them makes the 307 drop the secret and strand the client.
         scope['root_path'] = self.prefix
 
         await self.app(scope, receive, send)
