@@ -1727,13 +1727,20 @@ class Graphiti:
                 search_filter=SearchFilters(edge_uuids=[edge.uuid for edge in valid_edges]),
             )
         ).edges
+        source_node_edges, target_node_edges = await semaphore_gather(
+            EntityEdge.get_by_node_uuid(self.driver, edge.source_node_uuid),
+            EntityEdge.get_by_node_uuid(self.driver, edge.target_node_uuid),
+        )
+        neighbor_edge_uuids = list(
+            {e.uuid for e in source_node_edges} | {e.uuid for e in target_node_edges}
+        )
         existing_edges = (
             await search(
                 self.clients,
                 edge.fact,
                 group_ids=[edge.group_id],
                 config=EDGE_HYBRID_SEARCH_RRF,
-                search_filter=SearchFilters(),
+                search_filter=SearchFilters(edge_uuids=neighbor_edge_uuids),
             )
         ).edges
 

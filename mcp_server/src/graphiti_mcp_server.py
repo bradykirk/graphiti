@@ -968,12 +968,18 @@ async def add_triplet(
     group_id: str | None = None,
     source_node_uuid: str | None = None,
     target_node_uuid: str | None = None,
+    valid_at: str | None = None,
+    invalid_at: str | None = None,
 ) -> TripletResponse | ErrorResponse:
     """Directly add a single fact triplet (source entity -> fact -> target entity).
 
     Unlike add_memory, this bypasses episode extraction and writes the relationship
-    directly. graphiti-core resolves the source/target nodes against existing entities
-    (deduplicating by name) and generates the required embeddings internally.
+    directly, with no episode behind it for provenance. graphiti-core resolves the
+    source/target nodes by name against existing entities and generates the required
+    embeddings internally; there is currently no way to skip that name-based
+    resolution. The write may also invalidate other, unrelated facts in the group
+    that resolve as similar to this one's text — the candidate search is not scoped
+    to the source/target nodes.
 
     Args:
         source_node_name: Name of the source entity
@@ -985,6 +991,11 @@ async def add_triplet(
             generated when omitted.
         target_node_uuid: Optional UUID to reuse an existing target entity. A new UUID is
             generated when omitted.
+        valid_at: Optional ISO-8601 timestamp for when this fact became true. When
+            omitted, graphiti-core guesses a value by reading dates out of the fact
+            text, which is unreliable — pass this explicitly when the date is known.
+        invalid_at: Optional ISO-8601 timestamp for when this fact stopped being true.
+            Same guessing caveat as valid_at.
     """
     global graphiti_service
 
@@ -1018,6 +1029,8 @@ async def add_triplet(
             source_node_uuid=source_node.uuid,
             target_node_uuid=target_node.uuid,
             created_at=now,
+            valid_at=parse_reference_time(valid_at),
+            invalid_at=parse_reference_time(invalid_at),
         )
 
         result = await client.add_triplet(source_node, edge, target_node)
