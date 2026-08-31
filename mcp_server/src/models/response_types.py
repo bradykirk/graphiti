@@ -82,6 +82,11 @@ class TripletResponse(TypedDict):
     edges: list[EdgeResult]
 
 
+class EntityNodeResponse(TypedDict):
+    message: str
+    node: NodeResult
+
+
 class EpisodeEntitiesResponse(TypedDict):
     message: str
     nodes: list[NodeResult]

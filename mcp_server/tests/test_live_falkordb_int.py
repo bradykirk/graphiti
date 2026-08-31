@@ -188,6 +188,8 @@ async def test_server_lists_core_tools():
             'get_episodes',
             'get_entity_edge',
             'delete_entity_edge',
+            'delete_entity_node',
+            'create_entity_node',
             'delete_episode',
             'clear_graph',
             'get_status',

@@ -27,6 +27,7 @@ from config.schema import GraphitiConfig, ServerConfig
 from models.response_types import (
     BuildCommunitiesResponse,
     CommunityResult,
+    EntityNodeResponse,
     EpisodeEntitiesResponse,
     EpisodeSearchResponse,
     ErrorResponse,
@@ -161,7 +162,9 @@ Core tools:
 - get_episode_entities: trace provenance — the entities and facts created by specific episode UUIDs.
 - get_entity_edge / get_episodes: retrieve specific facts or episodes.
 - delete_episode: remove an episode and cascade-delete the entities/facts it solely created.
-- delete_entity_edge / clear_graph: remove a fact, or clear a group's data.
+- delete_entity_edge / delete_entity_node / clear_graph: remove a fact, remove an entity and
+  its attached facts (delete_entity_node needs confirm=True; call it without confirm first to
+  see what would be lost), or clear a group's data.
 
 Custom types: the server can register rich entity-type and edge-type models (with attributes and
 extraction instructions) from configuration, and constrain which edge types are allowed between which
@@ -671,6 +674,59 @@ async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse:
 
 
 @mcp.tool()
+async def delete_entity_node(uuid: str, confirm: bool = False) -> SuccessResponse | ErrorResponse:
+    """Delete an entity node from the graph memory.
+
+    Removes the entity and detaches everything attached to it: the facts it shares
+    with other entities, the MENTIONS links from episodes, and the HAS_MEMBER links
+    from communities. The episodes and communities themselves are preserved. This
+    cannot be undone.
+
+    Call without confirm first. The tool then deletes nothing and reports the
+    entity name and how many facts would be lost, so the deletion can be checked
+    before it happens.
+
+    To remove a single fact instead of the whole entity, use delete_entity_edge.
+
+    Args:
+        uuid: UUID of the entity node to delete
+        confirm: Must be True to actually delete. Defaults to False (dry run).
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        client = await graphiti_service.get_client()
+
+        # Look the node up first so a bad UUID fails before any deletion.
+        entity_node = await EntityNode.get_by_uuid(client.driver, uuid)
+
+        if not confirm:
+            # Dry run: report what the deletion would destroy and change nothing.
+            edges = await EntityEdge.get_by_node_uuid(client.driver, uuid)
+            return ErrorResponse(
+                error=(
+                    f'Deletion not confirmed, so nothing was deleted. Entity '
+                    f'{entity_node.name!r} (group {entity_node.group_id}, UUID {uuid}) '
+                    f'has {len(edges)} attached fact(s), which would all be deleted '
+                    f'with it. Call delete_entity_node again with confirm=True to '
+                    f'proceed.'
+                )
+            )
+
+        # delete() issues a DETACH DELETE, so attached edges go with the node.
+        await entity_node.delete(client.driver)
+        logger.info(f'Deleted entity node {uuid} ({entity_node.name!r})')
+        return SuccessResponse(message=f'Entity node with UUID {uuid} deleted successfully')
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error deleting entity node: {error_msg}')
+        return ErrorResponse(error=f'Error deleting entity node: {error_msg}')
+
+
+@mcp.tool()
 async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
     """Delete an episode from the graph memory.
 
@@ -975,6 +1031,62 @@ async def add_triplet(
         error_msg = str(e)
         logger.error(f'Error adding triplet: {error_msg}')
         return ErrorResponse(error=f'Error adding triplet: {error_msg}')
+
+
+@mcp.tool()
+async def create_entity_node(
+    name: str,
+    group_id: str | None = None,
+    summary: str | None = None,
+    entity_type: str | None = None,
+    attributes: dict[str, Any] | None = None,
+) -> EntityNodeResponse | ErrorResponse:
+    """Directly create a single entity node, bypassing extraction and entity resolution.
+
+    Unlike add_memory and add_triplet, this does not search for or merge into any
+    existing node. It always creates a new node with a fresh UUID. Use this when you
+    need precise control over what gets written, or when automatic name-based
+    resolution would misfile the entity.
+
+    Args:
+        name: Name of the entity
+        group_id: Optional group ID. Falls back to the default group when omitted.
+        summary: Optional summary of the entity
+        entity_type: Optional label for the entity (e.g. "Preference", "Procedure")
+        attributes: Optional additional attributes to store on the node
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        client = await graphiti_service.get_client()
+
+        effective_group_id = group_id or config.graphiti.group_id
+        if not effective_group_id:
+            return ErrorResponse(error='No group_id provided and no default group_id is configured')
+
+        node = EntityNode(
+            name=name,
+            group_id=effective_group_id,
+            summary=summary or '',
+            labels=[entity_type] if entity_type else [],
+            attributes=attributes or {},
+            created_at=datetime.now(timezone.utc),
+        )
+
+        await node.generate_name_embedding(client.embedder)
+        await node.save(client.driver)
+
+        return EntityNodeResponse(
+            message=f"Entity node '{name}' created",
+            node=to_node_result(node),
+        )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error creating entity node: {error_msg}')
+        return ErrorResponse(error=f'Error creating entity node: {error_msg}')
 
 
 @mcp.tool()

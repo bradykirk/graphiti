@@ -578,6 +578,9 @@ The Graphiti MCP server exposes the following tools:
   Supports the bi-temporal `reference_time`, `excluded_entity_types`, `custom_extraction_instructions`,
   `previous_episode_uuids`, `update_communities`, and `saga` / `saga_previous_episode_uuid`.
 - `add_triplet`: Add a single fact (source entity -> fact -> target entity) directly, bypassing extraction.
+- `create_entity_node`: Create a single entity node directly, bypassing extraction and entity
+  resolution. Always creates a new node with a fresh UUID; does not search for or merge into any
+  existing node.
 - `search_nodes`: Search the knowledge graph for relevant entities; supports `entity_types` and `center_node_uuid`.
 - `search_memory_facts`: Search for relevant facts (edges); supports `edge_types`, `center_node_uuid`,
   and `valid_at` / `invalid_at` date-range filters.
@@ -585,6 +588,9 @@ The Graphiti MCP server exposes the following tools:
 - `build_communities`: Detect entity communities and produce higher-level community summaries.
 - `get_episode_entities`: Trace provenance — the entities and facts created by specific episode UUIDs.
 - `delete_entity_edge`: Delete an entity edge from the knowledge graph.
+- `delete_entity_node`: Delete an entity node and detach every fact attached to it. Guarded by
+  `confirm`; without it the tool deletes nothing and reports the entity name and the number of
+  facts that would be lost.
 - `delete_episode`: Delete an episode and cascade-delete the entities/facts it solely created.
 - `get_entity_edge`: Get an entity edge by its UUID.
 - `get_episodes`: Get the most recent episodes for a specific group.
