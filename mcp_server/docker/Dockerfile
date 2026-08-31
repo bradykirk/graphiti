@@ -8,12 +8,15 @@ FROM falkordb/falkordb:latest AS falkordb-base
 # Note: Debian 13 "trixie" (FalkorDB base) ships with Python 3.13.
 # procps is omitted: its postinst runs update-rc.d (a perl script), and the
 # FalkorDB base image no longer ships perl (purged upstream for CVE reduction).
+# git is required to install graphiti-core from bradykirk/graphiti (see
+# [tool.uv.sources] in pyproject.toml) instead of PyPI.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-dev \
     python3-pip \
     curl \
     ca-certificates \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for Python package management
