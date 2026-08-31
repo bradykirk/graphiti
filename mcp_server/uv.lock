@@ -646,15 +646,15 @@ wheels = [
 
 [[package]]
 name = "falkordb"
-version = "1.2.0"
+version = "1.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "python-dateutil" },
     { name = "redis" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/3b/2d846e877aec104841c523e99e1c584d4aa2423a0e31afee5b8369e3c8c5/falkordb-1.2.0.tar.gz", hash = "sha256:ce57365b86722d538e75aa5d438de67ecd8eb9478da612506d9812cd7f182d0b", size = 28976, upload-time = "2025-06-30T18:03:37.829Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/d3/799a947869d9b8dd4cfcc6dc9654869874b1130375a78033b5a92362dc67/falkordb-1.7.1.tar.gz", hash = "sha256:09dd89dfb668c6fe7741c0ec67fcdb5c7a4b009e87f065a644199170f4fa5766", size = 121375, upload-time = "2026-08-13T13:17:39.652Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/81/1265e623c989bb8c12fe566645bad390d04e66fa62b84ca656e5bafce1f0/falkordb-1.2.0-py3-none-any.whl", hash = "sha256:7572d9cc377735d22efc52fe6fe73c7a435422c827b6ea3ca223a850a77be12e", size = 34737, upload-time = "2025-06-30T18:03:36.582Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/43/41967fad8b625e2b319e03a1c8897535dd1e05723a051342422b48b870da/falkordb-1.7.1-py3-none-any.whl", hash = "sha256:0e62d535edd5abf7b6d35e2493fba71118734313436ff803fcd5d1b20e9e2194", size = 38283, upload-time = "2026-08-13T13:17:38.257Z" },
 ]
 
 [[package]]
@@ -831,8 +831,8 @@ wheels = [
 
 [[package]]
 name = "graphiti-core"
-version = "0.29.2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.29.3"
+source = { git = "https://github.com/bradykirk/graphiti.git?rev=379be01b60e5d4d4cfead21281782118e0dc3e4d#379be01b60e5d4d4cfead21281782118e0dc3e4d" }
 dependencies = [
     { name = "neo4j" },
     { name = "numpy" },
@@ -841,10 +841,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "tenacity" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/3a/a59990224ec20d054f1597050298a112982c638b755c9b77a7cdb2b572fc/graphiti_core-0.29.2.tar.gz", hash = "sha256:dd746a2546abfe5ff9025f088f4793a027bce949e044762cb2ea3ec8f1db8e63", size = 6944531, upload-time = "2026-06-08T14:26:07.717Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/c0/cc379ce0e6c54c2224886962ff78b3de9983a3f66dd27708f840d2681847/graphiti_core-0.29.2-py3-none-any.whl", hash = "sha256:536780d1dd5d2e16f50fcc75b29bc1c2f2a53e5d651fb49482c43b7d8c2841d5", size = 357991, upload-time = "2026-06-08T14:26:05.532Z" },
 ]
 
 [package.optional-dependencies]
@@ -1296,6 +1292,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "typing-extensions" },
 ]
 
@@ -1329,12 +1326,13 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'providers'", specifier = ">=0.107.1" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.3" },
     { name = "google-genai", marker = "extra == 'providers'", specifier = ">=2.8.0" },
-    { name = "graphiti-core", extras = ["falkordb"], specifier = ">=0.29.2" },
+    { name = "graphiti-core", extras = ["falkordb"], git = "https://github.com/bradykirk/graphiti.git?rev=379be01b60e5d4d4cfead21281782118e0dc3e4d" },
     { name = "groq", marker = "extra == 'providers'", specifier = ">=1.2.0" },
     { name = "mcp", specifier = ">=1.27.2,<2" },
     { name = "openai", specifier = ">=2.41.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "redis", specifier = ">=7.1.0,<8.1.0" },
     { name = "sentence-transformers", marker = "extra == 'providers'", specifier = ">=3.2.1" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
     { name = "voyageai", marker = "extra == 'providers'", specifier = ">=0.3.7" },
@@ -2461,15 +2459,14 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "5.3.1"
+version = "8.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "async-timeout", marker = "python_full_version < '3.11.3'" },
-    { name = "pyjwt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/cf/128b1b6d7086200c9f387bd4be9b2572a30b90745ef078bd8b235042dc9f/redis-5.3.1.tar.gz", hash = "sha256:ca49577a531ea64039b5a36db3d6cd1a0c7a60c34124d46924a45b956e8cf14c", size = 4626200, upload-time = "2025-07-25T08:06:27.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/c3/928b290c2c0ca99ab96eea5b4ff8f30be8112b075301a7d3ba214a3c8c12/redis-8.0.1.tar.gz", hash = "sha256:afc5a7a2f5a084f5b1880dec548dd45be17db7e43c82a30d84f952aefb05cfb0", size = 5114170, upload-time = "2026-06-23T14:52:37.728Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/26/5c5fa0e83c3621db835cfc1f1d789b37e7fa99ed54423b5f519beb931aa7/redis-5.3.1-py3-none-any.whl", hash = "sha256:dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97", size = 272833, upload-time = "2025-07-25T08:06:26.317Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/0a/c2345ebf1ebe70840ce3f6c6ee612f8fa749cfbd1b03069c53bf0c62aaad/redis-8.0.1-py3-none-any.whl", hash = "sha256:47daa35a058c23468d6437f17a8c76882cb316b838ef763036af99b96cedd743", size = 502406, upload-time = "2026-06-23T14:52:36.137Z" },
 ]
 
 [[package]]

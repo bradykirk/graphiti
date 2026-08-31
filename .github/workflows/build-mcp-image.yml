@@ -2,7 +2,12 @@
 # fix) and pushes it to ghcr.io/bradykirk/graphiti-mcp.
 #
 # Coolify pulls the :proxy-fix tag, so that tag is always updated. The image is
-# also tagged with the MCP server version, the graphiti-core version, and latest.
+# also tagged with the MCP server version, the graphiti-core commit, and latest.
+#
+# graphiti-core is installed from bradykirk/graphiti (this repo), not PyPI, at
+# the commit pinned below -- see mcp_server/pyproject.toml [tool.uv.sources].
+# Bump GRAPHITI_CORE_REF deliberately to ship graphiti_core changes; a
+# `git pull origin main` merge does not update this on its own.
 #
 # Triggers: push to main that touches mcp_server/, or a manual run.
 name: Build MCP Image
@@ -18,7 +23,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: bradykirk/graphiti-mcp
-  GRAPHITI_CORE_VERSION: '0.29.3'
+  GRAPHITI_CORE_REF: '379be01b60e5d4d4cfead21281782118e0dc3e4d'
 
 jobs:
   build:
@@ -53,13 +58,14 @@ jobs:
         id: tags
         run: |
           MCP_VERSION="${{ steps.meta.outputs.mcp_version }}"
-          GRAPHITI_VERSION="${{ env.GRAPHITI_CORE_VERSION }}"
+          GRAPHITI_REF="${{ env.GRAPHITI_CORE_REF }}"
+          GRAPHITI_SHORT_REF="${GRAPHITI_REF:0:7}"
           IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
           TAGS="${IMG}:proxy-fix"
           TAGS="${TAGS},${IMG}:latest"
           TAGS="${TAGS},${IMG}:${MCP_VERSION}"
-          TAGS="${TAGS},${IMG}:${MCP_VERSION}-graphiti-${GRAPHITI_VERSION}"
+          TAGS="${TAGS},${IMG}:${MCP_VERSION}-graphiti-git-${GRAPHITI_SHORT_REF}"
           TAGS="${TAGS},${IMG}:sha-${{ steps.meta.outputs.vcs_ref }}"
 
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
@@ -75,7 +81,7 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             MCP_SERVER_VERSION=${{ steps.meta.outputs.mcp_version }}
-            GRAPHITI_CORE_VERSION=${{ env.GRAPHITI_CORE_VERSION }}
+            GRAPHITI_CORE_REF=${{ env.GRAPHITI_CORE_REF }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
             VCS_REF=${{ steps.meta.outputs.vcs_ref }}
           cache-from: type=gha
@@ -87,7 +93,7 @@ jobs:
             echo "## MCP Image Build"
             echo ""
             echo "**MCP Server Version:** ${{ steps.meta.outputs.mcp_version }}"
-            echo "**Graphiti Core Version:** ${{ env.GRAPHITI_CORE_VERSION }}"
+            echo "**Graphiti Core Commit:** ${{ env.GRAPHITI_CORE_REF }} (bradykirk/graphiti)"
             echo "**Commit:** ${{ steps.meta.outputs.vcs_ref }}"
             echo ""
             echo "### Tags"

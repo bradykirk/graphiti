@@ -48,8 +48,11 @@ ENV UV_COMPILE_BYTECODE=1 \
 # Set up MCP server directory
 WORKDIR /app/mcp
 
-# Accept graphiti-core version as build argument
-ARG GRAPHITI_CORE_VERSION=0.29.3
+# Accept the graphiti-core commit to pin as a build argument. graphiti-core is
+# installed from bradykirk/graphiti (see [tool.uv.sources] in pyproject.toml),
+# not from PyPI -- see the fork-deploy notes for why. Pin to a commit, not a
+# branch, so builds stay reproducible.
+ARG GRAPHITI_CORE_REF=379be01b60e5d4d4cfead21281782118e0dc3e4d
 ARG SOCKET_FIREWALL_ENABLED=false
 # Unique per release run so enforced builds re-resolve and re-download instead
 # of reusing cached layers, which sfw would never see.
@@ -58,8 +61,7 @@ ARG SOCKET_SCAN_ID=
 # Copy project files for dependency installation
 COPY pyproject.toml uv.lock ./
 
-# Remove the local path override for graphiti-core in Docker builds
-# and regenerate lock file to match the PyPI version.
+# Pin graphiti-core to the requested commit and regenerate the lock file.
 # When socket_api_key is mounted (official releases), route through sfw.
 RUN --mount=type=secret,id=socket_api_key \
     set -eu; \
@@ -78,11 +80,10 @@ RUN --mount=type=secret,id=socket_api_key \
       echo "socket_api_key absent; installing without Socket Firewall"; \
       UV_CMD="uv"; \
     fi; \
-    sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml; \
-    if [ -n "${GRAPHITI_CORE_VERSION}" ]; then \
-      sed -i "s/graphiti-core\[falkordb\][>=]\+[0-9]\+\.[0-9]\+\.[0-9]\+/graphiti-core[falkordb]==${GRAPHITI_CORE_VERSION}/" pyproject.toml; \
+    if [ -n "${GRAPHITI_CORE_REF}" ]; then \
+      sed -i "s/rev = \"[^\"]*\"/rev = \"${GRAPHITI_CORE_REF}\"/" pyproject.toml; \
     fi; \
-    echo "Regenerating lock file for PyPI graphiti-core..."; \
+    echo "Regenerating lock file for bradykirk/graphiti@${GRAPHITI_CORE_REF}..."; \
     rm -f uv.lock; \
     $UV_CMD lock
 
@@ -111,7 +112,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     $UV_CMD sync --no-group dev
 
 # Store graphiti-core version
-RUN echo "${GRAPHITI_CORE_VERSION}" > /app/mcp/.graphiti-core-version
+RUN echo "${GRAPHITI_CORE_REF}" > /app/mcp/.graphiti-core-version
 
 # Copy MCP server application code
 COPY main.py ./
@@ -184,7 +185,7 @@ LABEL org.opencontainers.image.title="FalkorDB + Graphiti MCP Server" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.vendor="Zep AI" \
       org.opencontainers.image.source="https://github.com/zep-ai/graphiti" \
-      graphiti.core.version="${GRAPHITI_CORE_VERSION}"
+      graphiti.core.version="${GRAPHITI_CORE_REF}"
 
 # Expose ports
 EXPOSE 6379 3000 8000

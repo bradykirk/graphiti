@@ -7,7 +7,7 @@ requires-python = ">=3.10,<4"
 dependencies = [
     "mcp>=1.27.2,<2",
     "openai>=2.41.0",
-    "graphiti-core[falkordb]>=0.29.2",
+    "graphiti-core[falkordb]",
     # Fork: redis-py 8.1.0 adds an async-only connection kwarg (himport_registry)
     # that falkordb<=1.6.2 forwards to the sync Redis client, crashing FalkorDriver
     # at startup. Cap until falkordb handles redis>=8.1.
@@ -16,6 +16,15 @@ dependencies = [
     "pyyaml>=6.0.3",
     "typing-extensions>=4.0.0",
 ]
+
+# Fork: install graphiti-core from bradykirk/graphiti instead of PyPI, pinned to
+# a specific commit (not a branch) so builds stay reproducible. Bump the rev
+# deliberately to pick up more graphiti_core changes; `git pull origin main`
+# merges do not update this on their own. The Docker build overwrites this rev
+# with the GRAPHITI_CORE_REF build arg, so bumping the workflow's env var is
+# normally enough — edit this default too so local dev tracks the same commit.
+[tool.uv.sources]
+graphiti-core = { git = "https://github.com/bradykirk/graphiti.git", rev = "379be01b60e5d4d4cfead21281782118e0dc3e4d" }
 
 [project.optional-dependencies]
 azure = [
