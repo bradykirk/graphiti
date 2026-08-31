@@ -977,9 +977,10 @@ async def add_triplet(
     directly, with no episode behind it for provenance. graphiti-core resolves the
     source/target nodes by name against existing entities and generates the required
     embeddings internally; there is currently no way to skip that name-based
-    resolution. The write may also invalidate other, unrelated facts in the group
-    that resolve as similar to this one's text — the candidate search is not scoped
-    to the source/target nodes.
+    resolution. The write may also invalidate other facts already attached to the
+    source or target entities that resolve as similar to this one's text; the
+    candidate search is scoped to edges touching those two nodes, so unrelated
+    facts elsewhere in the group are not affected.
 
     Args:
         source_node_name: Name of the source entity
