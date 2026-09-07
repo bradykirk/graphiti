@@ -23,7 +23,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: bradykirk/graphiti-mcp
-  GRAPHITI_CORE_REF: '379be01b60e5d4d4cfead21281782118e0dc3e4d'
+  GRAPHITI_CORE_REF: 'd0d2acfa8da550046bf1c4cac6a0cef59b581b17'
 
 jobs:
   build:

@@ -24,7 +24,7 @@ dependencies = [
 # with the GRAPHITI_CORE_REF build arg, so bumping the workflow's env var is
 # normally enough — edit this default too so local dev tracks the same commit.
 [tool.uv.sources]
-graphiti-core = { git = "https://github.com/bradykirk/graphiti.git", rev = "379be01b60e5d4d4cfead21281782118e0dc3e4d" }
+graphiti-core = { git = "https://github.com/bradykirk/graphiti.git", rev = "d0d2acfa8da550046bf1c4cac6a0cef59b581b17" }
 
 [project.optional-dependencies]
 azure = [
