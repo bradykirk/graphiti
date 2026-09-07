@@ -40,13 +40,14 @@ from graphiti_core.prompts.extract_nodes import (
     SummarizedEntities,
 )
 from graphiti_core.search.search_filters import SearchFilters
-from graphiti_core.search.search_utils import node_similarity_search
+from graphiti_core.search.search_utils import node_fulltext_search, node_similarity_search
 from graphiti_core.utils.datetime_utils import utc_now
 from graphiti_core.utils.maintenance.attribute_utils import apply_capped_attributes
 from graphiti_core.utils.maintenance.dedup_helpers import (
     DedupCandidateIndexes,
     DedupResolutionState,
     _build_candidate_indexes,
+    _normalize_name_for_fuzzy,
     _normalize_string_exact,
     _promote_resolved_node,
     _resolve_with_similarity,
@@ -410,9 +411,69 @@ async def _collect_candidate_nodes(
     existing_nodes_override: list[EntityNode] | None,
 ) -> list[list[EntityNode]]:
     """Search per extracted name and return ordered candidates for each extracted node."""
-    search_results = await _semantic_candidate_search(clients, extracted_nodes)
+    semantic_results, lexical_results = await semaphore_gather(
+        _semantic_candidate_search(clients, extracted_nodes),
+        _lexical_candidate_search(clients, extracted_nodes),
+    )
 
-    return [_merge_candidate_nodes(result, existing_nodes_override) for result in search_results]
+    return [
+        _merge_candidate_nodes(semantic + lexical, existing_nodes_override)
+        for semantic, lexical in zip(semantic_results, lexical_results, strict=True)
+    ]
+
+
+async def _lexical_candidate_search(
+    clients: GraphitiClients,
+    extracted_nodes: list[EntityNode],
+) -> list[list[EntityNode]]:
+    """Run a per-node BM25 name search so exact names survive a vector-search miss.
+
+    Vector recall alone drops any node whose stored name_embedding is missing or scores
+    below NODE_DEDUP_COSINE_MIN_SCORE. Such a node used to be invisible to dedup, which
+    created a silent duplicate. The lexical pass is index-backed and covers that gap.
+
+    The fulltext index also covers `summary`, so BM25 returns nodes that merely mention
+    the name. Those are not dedup candidates, so keep only hits that share a name token.
+    """
+    if not extracted_nodes:
+        return []
+
+    search_results = await semaphore_gather(
+        *[
+            node_fulltext_search(
+                clients.driver,
+                node.name,
+                SearchFilters(),
+                [node.group_id],
+                NODE_DEDUP_CANDIDATE_LIMIT,
+            )
+            for node in extracted_nodes
+        ]
+    )
+
+    return [
+        _filter_candidates_by_name_overlap(node, candidates)
+        for node, candidates in zip(extracted_nodes, search_results, strict=True)
+    ]
+
+
+def _name_tokens(name: str) -> set[str]:
+    """Split a name into normalized tokens for lexical overlap checks."""
+    return set(_normalize_name_for_fuzzy(name).split())
+
+
+def _filter_candidates_by_name_overlap(
+    extracted_node: EntityNode,
+    candidates: list[EntityNode],
+) -> list[EntityNode]:
+    """Keep candidates whose own name shares at least one token with the extracted name."""
+    extracted_tokens = _name_tokens(extracted_node.name)
+    if not extracted_tokens:
+        return []
+
+    return [
+        candidate for candidate in candidates if _name_tokens(candidate.name) & extracted_tokens
+    ]
 
 
 async def _semantic_candidate_search(

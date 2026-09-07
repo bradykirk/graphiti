@@ -68,6 +68,18 @@ def _semantic_candidates(candidate_groups: list[list[EntityNode]]):
     return fake_search
 
 
+@pytest.fixture(autouse=True)
+def stub_lexical_candidate_search(monkeypatch):
+    """Keep the BM25 candidate lookup off the MagicMock driver by default.
+
+    Tests that care about lexical recall re-patch this with their own double.
+    """
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.node_fulltext_search',
+        AsyncMock(return_value=[]),
+    )
+
+
 @pytest.mark.asyncio
 async def test_resolve_nodes_exact_match_skips_llm(monkeypatch):
     clients, llm_generate = _make_clients()
@@ -918,3 +930,128 @@ async def test_batch_summaries_calls_llm_for_long_summary():
     # LLM should have been called to condense the long summary
     llm_client.generate_response.assert_awaited_once()
     assert node.summary == 'Condensed summary'
+
+
+@pytest.mark.asyncio
+async def test_resolve_nodes_falls_back_to_fulltext_when_vector_search_misses(monkeypatch):
+    """An existing node with the same name must resolve even when the vector search misses.
+
+    The candidate lookup used to be vector-only, so a node whose stored name_embedding was
+    missing or scored below NODE_DEDUP_COSINE_MIN_SCORE became invisible and a duplicate
+    was created silently.
+    """
+    clients, llm_generate = _make_clients()
+
+    candidate = EntityNode(name='Alex Horsman', group_id='group', labels=['Entity'])
+    extracted = EntityNode(name='Alex Horsman', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[]]),
+    )
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.node_fulltext_search',
+        AsyncMock(return_value=[candidate]),
+        raising=False,
+    )
+
+    resolved, uuid_map, _ = await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    assert resolved[0].uuid == candidate.uuid
+    assert uuid_map[extracted.uuid] == candidate.uuid
+    llm_generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_nodes_scopes_fulltext_candidates_to_node_group(monkeypatch):
+    """The lexical candidate lookup must stay inside the extracted node's own group."""
+    clients, _ = _make_clients()
+
+    extracted = EntityNode(name='Alex Horsman', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[]]),
+    )
+    fulltext_search = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.node_fulltext_search',
+        fulltext_search,
+        raising=False,
+    )
+
+    await resolve_extracted_nodes(
+        clients,
+        [extracted],
+        episode=_make_episode(),
+        previous_episodes=[],
+    )
+
+    fulltext_search.assert_awaited_once()
+    assert ['group'] in fulltext_search.await_args.args
+
+
+@pytest.mark.asyncio
+async def test_lexical_candidates_drop_summary_only_matches(monkeypatch):
+    """BM25 also indexes summary, so it returns nodes that only mention the name.
+
+    Those nodes are not dedup candidates. They must not reach the LLM dedupe prompt.
+    """
+    clients, _ = _make_clients()
+
+    name_match = EntityNode(name='Peak Wellness Director', group_id='group', labels=['Entity'])
+    summary_only_match = EntityNode(
+        name='Amanda',
+        group_id='group',
+        labels=['Entity'],
+        summary='Brady collaborates with Amanda who handles reviews at Peak Wellness.',
+    )
+    extracted = EntityNode(name='Peak Wellness', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[]]),
+    )
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.node_fulltext_search',
+        AsyncMock(return_value=[name_match, summary_only_match]),
+    )
+
+    result = await _collect_candidate_nodes(
+        clients,
+        [extracted],
+        existing_nodes_override=None,
+    )
+
+    assert [node.uuid for node in result[0]] == [name_match.uuid]
+
+
+@pytest.mark.asyncio
+async def test_lexical_candidates_keep_semantic_results_unfiltered(monkeypatch):
+    """The name-token filter applies to the BM25 pass only, never to vector recall."""
+    clients, _ = _make_clients()
+
+    semantic_hit = EntityNode(name='Alexander H.', group_id='group', labels=['Entity'])
+    extracted = EntityNode(name='Alex Horsman', group_id='group', labels=['Entity'])
+
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations._semantic_candidate_search',
+        _semantic_candidates([[semantic_hit]]),
+    )
+    monkeypatch.setattr(
+        'graphiti_core.utils.maintenance.node_operations.node_fulltext_search',
+        AsyncMock(return_value=[]),
+    )
+
+    result = await _collect_candidate_nodes(
+        clients,
+        [extracted],
+        existing_nodes_override=None,
+    )
+
+    assert [node.uuid for node in result[0]] == [semantic_hit.uuid]
