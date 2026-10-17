@@ -20,6 +20,10 @@ class QueueService:
         self._queue_workers: dict[str, bool] = {}
         # Store the graphiti client after initialization
         self._graphiti_client: Any = None
+        # One episode at a time across ALL groups. Graphiti.add_episode switches the shared
+        # client driver to the episode's group graph (FalkorDB: one graph per group), so two
+        # groups processed concurrently write into each other's graph.
+        self._process_lock = asyncio.Lock()
 
     async def add_episode_task(
         self, group_id: str, process_func: Callable[[], Awaitable[None]]
@@ -62,8 +66,9 @@ class QueueService:
                 process_func = await self._episode_queues[group_id].get()
 
                 try:
-                    # Process the episode
-                    await process_func()
+                    # Process the episode (serialized across groups, see _process_lock)
+                    async with self._process_lock:
+                        await process_func()
                 except Exception as e:
                     logger.error(
                         f'Error processing queued episode for group_id {group_id}: {str(e)}'
