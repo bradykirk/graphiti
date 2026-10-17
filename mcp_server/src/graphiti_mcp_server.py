@@ -836,14 +836,28 @@ async def get_episodes(
         )
 
         if effective_group_ids:
-            # retrieve_episodes is routed per group on FalkorDB (one graph per
-            # group_id) and orders by valid_at. It returns up to max_episodes per
-            # group, so merge, sort newest first, and cut.
-            episodes = await client.retrieve_episodes(
-                reference_time=datetime.now(timezone.utc),
-                last_n=max_episodes,
-                group_ids=effective_group_ids,
-            )
+            # retrieve_episodes orders by valid_at and, for one group, binds the
+            # FalkorDB driver to that group's graph. FalkorDB drops the connection
+            # on concurrent queries, and handle_multiple_group_ids runs several
+            # groups concurrently, so query FalkorDB groups one at a time. Each
+            # call returns up to max_episodes, so merge, sort newest first, and cut.
+            reference_time = datetime.now(timezone.utc)
+            if client.driver.provider == GraphProvider.FALKORDB:
+                episodes = []
+                for gid in effective_group_ids:
+                    episodes.extend(
+                        await client.retrieve_episodes(
+                            reference_time=reference_time,
+                            last_n=max_episodes,
+                            group_ids=[gid],
+                        )
+                    )
+            else:
+                episodes = await client.retrieve_episodes(
+                    reference_time=reference_time,
+                    last_n=max_episodes,
+                    group_ids=effective_group_ids,
+                )
             episodes = sorted(
                 episodes,
                 key=lambda e: (_utc_timestamp(e.valid_at), _utc_timestamp(e.created_at), e.uuid),

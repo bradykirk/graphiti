@@ -85,9 +85,11 @@ Plus an opt-in live check in `test_live_falkordb_int.py`: write to group A, writ
 ## As built
 
 - `get_episodes` calls `client.retrieve_episodes(reference_time=now, last_n=max_episodes,
-  group_ids=…)`, then sorts by `valid_at`, `created_at`, `uuid` (newest first, naive datetimes read
+  group_ids=…)`. On FalkorDB it calls it once per group, one after the other, because the FalkorDB
+  async driver drops the connection on concurrent queries (AGENTS.md) and
+  `handle_multiple_group_ids` would run the groups concurrently. It then sorts by `valid_at`, `created_at`, `uuid` (newest first, naive datetimes read
   as UTC) and cuts to `max_episodes`. Behavior change for all providers: order is by event time,
   not by uuid; episodes with `valid_at` in the future are not listed.
 - `create_entity_node` and `clear_graph(group_ids)` use `_driver_for_group`.
-- Tests: `mcp_server/tests/test_falkordb_group_routing.py` (7 tests; the 5 FalkorDB tests fail on
+- Tests: `mcp_server/tests/test_falkordb_group_routing.py` (8 tests; the FalkorDB tests fail on
   the old code). The live FalkorDB check is not written yet.

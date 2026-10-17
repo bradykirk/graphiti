@@ -5,6 +5,7 @@ On FalkorDB each group_id is its own graph and client.driver is re-bound to the
 last group written. These tests mock the client, so they need no database.
 """
 
+import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -85,23 +86,46 @@ class TestGetEpisodes:
         assert [e['uuid'] for e in result['episodes']] == ['a1']
 
     @pytest.mark.asyncio
-    async def test_merges_groups_newest_first_and_cuts(self, install):
+    async def test_falkordb_queries_groups_one_at_a_time_and_merges(self, install):
         client = install(_client(GraphProvider.FALKORDB))
-        # retrieve_episodes returns each group's episodes in chronological order, concatenated.
-        client.retrieve_episodes = AsyncMock(
-            return_value=[
-                _episode('a1', 'group_a', 1),
-                _episode('a3', 'group_a', 3),
-                _episode('b2', 'group_b', 2, naive=True),
-                _episode('b4', 'group_b', 4),
-            ]
-        )
+        per_group = {
+            'group_a': [_episode('a1', 'group_a', 1), _episode('a3', 'group_a', 3)],
+            'group_b': [_episode('b2', 'group_b', 2, naive=True), _episode('b4', 'group_b', 4)],
+        }
+        active = 0
+        max_active = 0
+
+        async def retrieve(*, reference_time, last_n, group_ids):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            assert len(group_ids) == 1
+            return per_group[group_ids[0]]
+
+        client.retrieve_episodes = AsyncMock(side_effect=retrieve)
 
         result = await graphiti_mcp_server.get_episodes(
             group_ids=['group_a', 'group_b'], max_episodes=3
         )
 
+        assert [c.kwargs['group_ids'] for c in client.retrieve_episodes.await_args_list] == [
+            ['group_a'],
+            ['group_b'],
+        ]
+        assert max_active == 1
         assert [e['uuid'] for e in result['episodes']] == ['b4', 'a3', 'b2']
+
+    @pytest.mark.asyncio
+    async def test_neo4j_queries_all_groups_in_one_call(self, install):
+        client = install(_client(GraphProvider.NEO4J))
+        client.retrieve_episodes = AsyncMock(return_value=[_episode('a1', 'group_a', 1)])
+
+        await graphiti_mcp_server.get_episodes(group_ids=['group_a', 'group_b'])
+
+        client.retrieve_episodes.assert_awaited_once()
+        assert client.retrieve_episodes.await_args.kwargs['group_ids'] == ['group_a', 'group_b']
 
     @pytest.mark.asyncio
     async def test_does_not_query_shared_driver_directly(self, install):
