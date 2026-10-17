@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 from graphiti_core import Graphiti
+from graphiti_core.driver.driver import GraphProvider
 from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
 from graphiti_core.search.search_filters import SearchFilters
@@ -352,6 +353,28 @@ class GraphitiService:
         if self.client is None:
             raise RuntimeError('Failed to initialize Graphiti client')
         return self.client
+
+
+def _utc_timestamp(value: datetime | None) -> float:
+    """Sort key that tolerates naive and aware datetimes (naive is read as UTC)."""
+    if value is None:
+        return float('-inf')
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def _driver_for_group(client: Graphiti, group_id: str):
+    """Return a driver bound to the graph that holds group_id.
+
+    On FalkorDB each group_id is its own graph, and client.driver is re-bound to
+    the last group written by add_episode. clone() reuses the connection and
+    does not change client.driver. Other providers keep one database.
+    """
+    driver = client.driver
+    if driver.provider == GraphProvider.FALKORDB:
+        return driver.clone(database=group_id)
+    return driver
 
 
 @mcp.tool()
@@ -812,13 +835,20 @@ async def get_episodes(
             else []
         )
 
-        # Get episodes from the driver directly
-        from graphiti_core.nodes import EpisodicNode
-
         if effective_group_ids:
-            episodes = await EpisodicNode.get_by_group_ids(
-                client.driver, effective_group_ids, limit=max_episodes
+            # retrieve_episodes is routed per group on FalkorDB (one graph per
+            # group_id) and orders by valid_at. It returns up to max_episodes per
+            # group, so merge, sort newest first, and cut.
+            episodes = await client.retrieve_episodes(
+                reference_time=datetime.now(timezone.utc),
+                last_n=max_episodes,
+                group_ids=effective_group_ids,
             )
+            episodes = sorted(
+                episodes,
+                key=lambda e: (_utc_timestamp(e.valid_at), _utc_timestamp(e.created_at), e.uuid),
+                reverse=True,
+            )[:max_episodes]
         else:
             # If no group IDs, we need to use a different approach
             # For now, return empty list when no group IDs specified
@@ -1091,7 +1121,7 @@ async def create_entity_node(
         )
 
         await node.generate_name_embedding(client.embedder)
-        await node.save(client.driver)
+        await node.save(_driver_for_group(client, effective_group_id))
 
         return EntityNodeResponse(
             message=f"Entity node '{name}' created",
@@ -1171,7 +1201,12 @@ async def clear_graph(
             return ErrorResponse(error='No group IDs specified for clearing')
 
         # Clear data for the specified group IDs
-        await clear_data(client.driver, group_ids=effective_group_ids)
+        if client.driver.provider == GraphProvider.FALKORDB:
+            # One graph per group_id: clear each group in its own graph.
+            for gid in effective_group_ids:
+                await clear_data(_driver_for_group(client, gid), group_ids=[gid])
+        else:
+            await clear_data(client.driver, group_ids=effective_group_ids)
 
         return SuccessResponse(
             message=f'Graph data cleared successfully for group IDs: {", ".join(effective_group_ids)}'
